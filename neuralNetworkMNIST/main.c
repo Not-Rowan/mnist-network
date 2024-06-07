@@ -18,10 +18,9 @@
 #define HIDDEN_LAYERS 1 // x hidden layers for this network
 #define HIDDEN_NODES (int[]){500} // x hidden layers with x nodes in each layer
 #define OUTPUT_NODES 10 // since we are using the mnist data set, the output will be a number between 0 and 9
-#define LEARNING_RATE 0.03f //0.03f // learning rate for gradient descent
+#define LEARNING_RATE 0.03f // learning rate for gradient descent
 
-#define HIDDEN_ACTIVATION 1 // 0 for sigmoid, 1 for relu, 2 for tanh (3 for softmax isnt supported for hidden layers)
-#define OUTPUT_ACTIVATION 0 // 0 for sigmoid, 1 for relu, 2 for tanh 3 for linear, 4 for softmax
+#define ACTIVATIONS (int[]){1, 4} // 0 for sigmoid, 1 for relu, 2 for tanh, 3 for linear, 4 for softmax
 
 #define TRAINING_DATA_SETS 60000 // 60,000 mnist training data sets
 #define MINI_BATCH_SIZE 100 // each mini batch is 100 data sets
@@ -255,7 +254,7 @@ int main(void) {
     // create network
     if (load == 'n') {
         printf("Creating network\n");
-        network = createNetwork(INPUT_NODES, HIDDEN_LAYERS, HIDDEN_NODES, OUTPUT_NODES);
+        network = createNetwork(INPUT_NODES, HIDDEN_LAYERS, HIDDEN_NODES, OUTPUT_NODES, ACTIVATIONS);
         if (network == NULL) {
             perror("Error creating network");
             return 1;
@@ -479,7 +478,7 @@ int main(void) {
         fclose(fp);
 
         // feed the user input through the network and print the most likely number
-        feedForward(network, userInput, HIDDEN_ACTIVATION, OUTPUT_ACTIVATION);
+        feedForward(network, userInput);
         int maxIndex = -1;
         for (int currentOutputNode = 0; currentOutputNode < OUTPUT_NODES; currentOutputNode++) {
             if (network->layers[network->layerCount - 1].values[currentOutputNode] > network->layers[network->layerCount - 1].values[maxIndex]) {
@@ -529,8 +528,8 @@ void *trainOnBatch(void *args) {
         pthread_mutex_lock(&lock);
 
         // feed forward and back propagate the entire training data set
-        feedForward(network, &batchDataInput[currentDataSet][0], HIDDEN_ACTIVATION, OUTPUT_ACTIVATION);
-        backPropagate(network, &batchDataOutput[currentDataSet][0], LEARNING_RATE, HIDDEN_ACTIVATION, OUTPUT_ACTIVATION);
+        feedForward(network, &batchDataInput[currentDataSet][0]);
+        backPropagate(network, &batchDataOutput[currentDataSet][0], LEARNING_RATE);
 
         // calculate cost with MSE
         cost = 0;
@@ -636,7 +635,7 @@ void testNetwork(float *inputData, int inputDataSize, float *outputData, int out
     // feed values through the network and check if the most likely output is correct
     for (int currentDataSet = 0; currentDataSet < dataLength; currentDataSet++) {
         //printf("Testing data set %d/%d\n", currentDataSet+1, TESTING_DATA_SETS);
-        feedForward(network, &inputData[currentDataSet * inputDataSize], HIDDEN_ACTIVATION, OUTPUT_ACTIVATION);
+        feedForward(network, &inputData[currentDataSet * inputDataSize]);
         int maxIndex = 0;
         for (int currentOutputNode = 0; currentOutputNode < outputDataSize; currentOutputNode++) {
             if (network->layers[network->layerCount - 1].values[currentOutputNode] > network->layers[network->layerCount - 1].values[maxIndex]) {

@@ -8,7 +8,7 @@
 // By: Rowan Rothe
 
 // redefine local functions
-void computeGradients(Network *network, float *expectedOutputs, int outputActivation, int hiddenActivation, float clipValue);
+void computeGradients(Network *network, float *expectedOutputs);
 void gradientDescent(Network *network, float learningRate);
 void gradientAscent(Network *network, float learningRate);
 
@@ -49,7 +49,14 @@ void reluDerivative(float *values, float *returnValues, int length) {
 // Activation function (Tanh)
 void tanhActivation(float *values, float *returnValues, int length) {
     for (int i = 0; i < length; i++) {
-        returnValues[i] = (expf(values[i]) - expf(-values[i])) / (expf(values[i]) + expf(-values[i]));
+        // prevent overflow by cutting off values at 20
+        if (values[i] > 20) {
+            returnValues[i] = 1;
+        } else if (values[i] < -20) {
+            returnValues[i] = -1;
+        } else {
+            returnValues[i] = (expf(values[i]) - expf(-values[i])) / (expf(values[i]) + expf(-values[i]));
+        }
     }
 }
 
@@ -118,24 +125,10 @@ void squaredErrorDerivative(float *expected, float *actual, float *returnValues,
     }
 }
 
-// calculate the weighted sum for two values (weight and value
-/*void calculateWeightedSum(float *values, float *incomingWeights, float *weightedSum, int length) {
-    for (int i = 0; i < length; i++) {
-        *weightedSum += values[i] * incomingWeights[i];
-    }
-}*/
-
-// calculate the weighted sum for backwards prop
-// using the next neuron's delta value and the next neuron's incoming weights
-// figure this out another time
-/*void calculateWeightedSumBackwards(Neuron *nextNeurons, float *nextIncomingWeights, float *weightedSum, int length) {
-    for (int i = 0; i < length; i++) {
-        *weightedSum += nextNeurons[i].gradients * nextIncomingWeights[i];
-    }
-}*/
-
 // Create network
-Network *createNetwork(int inputNodes, int hiddenLayers, int *hiddenNodes, int outputNodes) {
+// ACTIVATION CODES: 0 = sigmoid, 1 = relu, 2 = tanh, 3 = linear, 4 = softmax (only for output activation)
+// activation functions must be an array of length hiddenLayers + 1. The input layer does not have an activation function
+Network *createNetwork(int inputNodes, int hiddenLayers, int *hiddenNodes, int outputNodes, int *activationFunctions) {
     // Create network
     Network *network = malloc(sizeof(Network));
     if (network == NULL) {
@@ -148,6 +141,23 @@ Network *createNetwork(int inputNodes, int hiddenLayers, int *hiddenNodes, int o
         return NULL;
     }
 
+    // Specify the activation functions for each layer
+    // exclude input layer and exclude softmax from hidden layers
+    network->activationFunctions = malloc((network->layerCount - 1) * sizeof(int));
+    if (network->activationFunctions == NULL) {
+        freeNetwork(network);
+        return NULL;
+    }
+    for (int i = 0; i < network->layerCount - 1; i++) {
+        if (i != network->layerCount - 2 && activationFunctions[i] == 4) {
+            // softmax is only for the output layer
+            freeNetwork(network);
+            return NULL;
+        }
+        
+        network->activationFunctions[i] = activationFunctions[i];
+    }
+
     // Create input layer
     network->layers[0].neuronCount = inputNodes;
     
@@ -155,47 +165,55 @@ Network *createNetwork(int inputNodes, int hiddenLayers, int *hiddenNodes, int o
     network->layers[0].incomingWeights = NULL;
     
     // Initialize input layer (allocate memory) and set bias to random number between -0.3 and 0.3. Input layer value and cost will be set when input is fed forward
+    // Biases
     network->layers[0].biases = malloc(network->layers[0].neuronCount * sizeof(float));
     if (network->layers[0].biases == NULL) {
         freeNetwork(network);
         return NULL;
     }
     
+    // Values
     network->layers[0].values = malloc(network->layers[0].neuronCount * sizeof(float));
     if (network->layers[0].values == NULL) {
         freeNetwork(network);
         return NULL;
     }
     
+    // Gradients
     network->layers[0].gradients = malloc(network->layers[0].neuronCount * sizeof(float));
     if (network->layers[0].gradients == NULL) {
         freeNetwork(network);
         return NULL;
     }
     
+    // Set initial values
     for (int inputIndex = 0; inputIndex < inputNodes; inputIndex++) {
         network->layers[0].biases[inputIndex] = ((float)rand() / RAND_MAX) * 0.6 - 0.3;
         network->layers[0].values[inputIndex] = 0;
         network->layers[0].gradients[inputIndex] = 0;
     }
 
+
     // Create hidden layers
     for (int currentHiddenLayer = 1; currentHiddenLayer < hiddenLayers + 1; currentHiddenLayer++) {
         network->layers[currentHiddenLayer].neuronCount = hiddenNodes[currentHiddenLayer - 1];
         
         // allocate memory for biases values and gradients
+        // Biases
         network->layers[currentHiddenLayer].biases = malloc(network->layers[currentHiddenLayer].neuronCount * sizeof(float));
         if (network->layers[currentHiddenLayer].biases == NULL) {
             freeNetwork(network);
             return NULL;
         }
         
+        // Values
         network->layers[currentHiddenLayer].values = malloc(network->layers[currentHiddenLayer].neuronCount * sizeof(float));
         if (network->layers[currentHiddenLayer].values == NULL) {
             freeNetwork(network);
             return NULL;
         }
         
+        // Gradients
         network->layers[currentHiddenLayer].gradients = malloc(network->layers[currentHiddenLayer].neuronCount * sizeof(float));
         if (network->layers[currentHiddenLayer].gradients == NULL) {
             freeNetwork(network);
@@ -230,6 +248,7 @@ Network *createNetwork(int inputNodes, int hiddenLayers, int *hiddenNodes, int o
         }
     }
     
+
     // Create output layer
     int outputLayerIndex = network->layerCount - 1;
     network->layers[outputLayerIndex].neuronCount = outputNodes;
@@ -313,6 +332,9 @@ void freeNetwork(Network *network) {
             network->layers[currentLayer].incomingWeights = NULL;
         }
     }
+    if (network->activationFunctions != NULL) {
+        free(network->activationFunctions);
+    }
     if (network->layers != NULL) {
         free(network->layers);
     }
@@ -322,8 +344,7 @@ void freeNetwork(Network *network) {
 }
 
 // feed forward by multiplying incoming value by incoming weights and adding the current neuron's bias
-// activation codes: 0 for sigmoid, 1 for relu, 2 for tanh, 3 for linear, 4 for softmax (only for output activation)
-void feedForward(Network *network, float *input, int hiddenActivation, int outputActivation) {
+void feedForward(Network *network, float *input) {
     // Set input layer values to input
     for (int inputNeuron = 0; inputNeuron < network->layers[0].neuronCount; inputNeuron++) {
         network->layers[0].values[inputNeuron] = input[inputNeuron];
@@ -345,60 +366,32 @@ void feedForward(Network *network, float *input, int hiddenActivation, int outpu
         }
 
         // then apply the activation function to the weighted sum
-        // if the current layer is the output layer, use the output activation function
-        // if the current layer is a hidden layer, use the hidden activation function
-        if (currentLayer == network->layerCount - 1) {
-            // output layer
-            switch (outputActivation) {
-                case 0:
-                    // sigmoid
-                    sigmoid(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-                case 1:
-                    // relu
-                    relu(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-                case 2:
-                    // tanh
-                    tanhActivation(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-                case 3:
-                    // linear
-                    linear(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-                case 4:
-                    // softmax
-                    softmax(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-                default:
-                    // default to sigmoid
-                    sigmoid(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-            }
-        } else {
-            // hidden layer
-            switch (hiddenActivation) {
-                case 0:
-                    // sigmoid
-                    sigmoid(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-                case 1:
-                    // relu
-                    relu(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-                case 2:
-                    // tanh
-                    tanhActivation(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-                case 3:
-                    // linear
-                    linear(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-                default:
-                    // default to sigmoid
-                    sigmoid(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
-                    break;
-            }
+        // the activation function is specified in the activationFunctions array
+        switch (network->activationFunctions[currentLayer-1]) {
+            case 0:
+                // sigmoid
+                sigmoid(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
+                break;
+            case 1:
+                // relu
+                relu(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
+                break;
+            case 2:
+                // tanh
+                tanhActivation(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
+                break;
+            case 3:
+                // linear
+                linear(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
+                break;
+            case 4:
+                // softmax
+                softmax(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
+                break;
+            default:
+                // default to sigmoid
+                sigmoid(weightedSumArray, network->layers[currentLayer].values, network->layers[currentLayer].neuronCount);
+                break;
         }
     }
 }
@@ -433,13 +426,9 @@ void printNetwork(Network *network) {
 
 // Backpropagate using gradient descent.
 // compute the gradients for each parameter in the network and apply the error to the network weights using gradient descent
-// activation codes: 0 for sigmoid, 1 for relu, 2 for tanh, 3 for linear, 4 for softmax (only for output activation)
-void backPropagate(Network *network, float *expectedOutputs, float learningRate, int hiddenActivation, int outputActivation) {
-    // set the clipping parameter
-    float clipValue = 5.0f;
-    
+void backPropagate(Network *network, float *expectedOutputs, float learningRate) {
     // compute the gradients for each layer
-    computeGradients(network, expectedOutputs, outputActivation, hiddenActivation, clipValue);
+    computeGradients(network, expectedOutputs);
 
     // apply error to network weights using gradient descent
     gradientDescent(network, learningRate);
@@ -447,27 +436,23 @@ void backPropagate(Network *network, float *expectedOutputs, float learningRate,
 
 // Function to reinforce the network using gradient ascent
 // This is the opposite of gradient descent
-void reinforceNetwork(Network *network, float *expectedOutputs, float learningRate, int hiddenActivation, int outputActivation) {
-    // set the clipping parameter
-    float clipValue = 5.0f;
-
+void reinforceNetwork(Network *network, float *expectedOutputs, float learningRate) {
     // propogate the gradient backwards through each layer
-    computeGradients(network, expectedOutputs, outputActivation, hiddenActivation, clipValue);
+    computeGradients(network, expectedOutputs);
 
     // apply error to network weights using gradient descent
     gradientAscent(network, learningRate);
 }
 
 // Function to compute the gradients for each parameter in the network
-// activation codes: 0 for sigmoid, 1 for relu, 2 for tanh, 3 for linear, 4 for softmax (only for output activation)
-void computeGradients(Network *network, float *expectedOutputs, int outputActivation, int hiddenActivation, float clipValue) {
+void computeGradients(Network *network, float *expectedOutputs) {
     // calculate the gradients for the output layer
     int outputLayerIndex = network->layerCount - 1;
-    if (outputActivation == 4) {
+    if (network->activationFunctions[outputLayerIndex-1] == 4) {
         // softmax (softmax will automatically use cross entropy as the cost function)
 
-        // difference between expected and actual output (cross entropy cost function)
-        // the derivative of the softmax function is the difference between the predicted and expected values
+        // cross entropy gradient is calculated as the difference between the target value and the predicted value for that output
+        // predicted_value - target_value
         for (int outputNeuron = 0; outputNeuron < network->layers[outputLayerIndex].neuronCount; outputNeuron++) {
             network->layers[outputLayerIndex].gradients[outputNeuron] = network->layers[outputLayerIndex].values[outputNeuron] - expectedOutputs[outputNeuron];
         }
@@ -478,9 +463,13 @@ void computeGradients(Network *network, float *expectedOutputs, int outputActiva
         float squaredErrorCosts[network->layers[outputLayerIndex].neuronCount];
         squaredErrorDerivative(expectedOutputs, network->layers[outputLayerIndex].values, squaredErrorCosts, network->layers[outputLayerIndex].neuronCount);
 
+        for (int outputNeuron = 0; outputNeuron < network->layers[outputLayerIndex].neuronCount; outputNeuron++) {
+            network->layers[outputLayerIndex].gradients[outputNeuron] = squaredErrorCosts[outputNeuron];
+        }
+
         // then calculate the derivative of the activation function for each neuron in the output layer
-        // this is the gradient of the activation function
-        switch (outputActivation) {
+        // this is stored in the gradients array for each neuron
+        switch (network->activationFunctions[outputLayerIndex-1]) {
             case 0:
                 // sigmoid
                 sigmoidDerivative(network->layers[outputLayerIndex].values, network->layers[outputLayerIndex].gradients, network->layers[outputLayerIndex].neuronCount);
@@ -503,23 +492,14 @@ void computeGradients(Network *network, float *expectedOutputs, int outputActiva
                 break;
         }
 
-        // then multiply the cost by the derivative of the activation function to get the gradient for each neuron in the output layer
+        // multiply the error by the derivative of the activation function for each neuron in the output layer and apply that to the gradient (this will be propogated backwards / applied later)
         for (int outputNeuron = 0; outputNeuron < network->layers[outputLayerIndex].neuronCount; outputNeuron++) {
-            network->layers[outputLayerIndex].gradients[outputNeuron] = squaredErrorCosts[outputNeuron] * network->layers[outputLayerIndex].gradients[outputNeuron];
-        }
-
-        // clip the gradients to prevent exploding gradients
-        for (int outputNeuron = 0; outputNeuron < network->layers[outputLayerIndex].neuronCount; outputNeuron++) {
-            if (network->layers[outputLayerIndex].gradients[outputNeuron] > clipValue) {
-                network->layers[outputLayerIndex].gradients[outputNeuron] = clipValue;
-            } else if (network->layers[outputLayerIndex].gradients[outputNeuron] < -clipValue) {
-                network->layers[outputLayerIndex].gradients[outputNeuron] = -clipValue;
-            }
+            network->layers[outputLayerIndex].gradients[outputNeuron] = network->layers[outputLayerIndex].gradients[outputNeuron] * squaredErrorCosts[outputNeuron];
         }
     }
 
 
-    // hidden & output layers
+    // hidden layers
     for (int currentLayer = network->layerCount - 2; currentLayer > 0; currentLayer--) {
         float weightedErrorValues[network->layers[currentLayer].neuronCount];
 
@@ -533,7 +513,7 @@ void computeGradients(Network *network, float *expectedOutputs, int outputActiva
         }
 
         // then calculate the derivative of the activation function for each neuron in the current layer
-        switch (hiddenActivation) {
+        switch (network->activationFunctions[currentLayer-1]) {
             case 0:
                 // sigmoid
                 sigmoidDerivative(network->layers[currentLayer].values, network->layers[currentLayer].gradients, network->layers[currentLayer].neuronCount);
@@ -556,16 +536,7 @@ void computeGradients(Network *network, float *expectedOutputs, int outputActiva
                 break;
         }
 
-        // clip the delta values to prevent exploding gradients
-        for (int currentNeuron = 0; currentNeuron < network->layers[currentLayer].neuronCount; currentNeuron++) {
-            if (network->layers[currentLayer].gradients[currentNeuron] > clipValue) {
-                network->layers[currentLayer].gradients[currentNeuron] = clipValue;
-            } else if (network->layers[currentLayer].gradients[currentNeuron] < -clipValue) {
-                network->layers[currentLayer].gradients[currentNeuron] = -clipValue;
-            }
-        }
-
-        // then multiply the error by the derivative of the activation function for each neuron in the current layer and apply that to the delta values (this will be propogated backwards / applied later)
+        // then multiply the error by the derivative of the activation function for each neuron in the current layer and apply that to the gradient (this will be propogated backwards / applied later)
         for (int currentNeuron = 0; currentNeuron < network->layers[currentLayer].neuronCount; currentNeuron++) {
             network->layers[currentLayer].gradients[currentNeuron] = weightedErrorValues[currentNeuron] * network->layers[currentLayer].gradients[currentNeuron];
         }
@@ -585,6 +556,13 @@ void gradientDescent(Network *network, float learningRate) {
             }
         }
     }
+
+    // clear the gradients after applying them
+    for (int currentLayer = 0; currentLayer < network->layerCount; currentLayer++) {
+        for (int currentNeuron = 0; currentNeuron < network->layers[currentLayer].neuronCount; currentNeuron++) {
+            network->layers[currentLayer].gradients[currentNeuron] = 0;
+        }
+    }
 }
 
 // Function to ascent a gradient (gradient descent)
@@ -599,6 +577,13 @@ void gradientAscent(Network *network, float learningRate) {
             for (int previousNeuronIndex = 0; previousNeuronIndex < network->layers[currentLayer - 1].neuronCount; previousNeuronIndex++) {
                 network->layers[currentLayer].incomingWeights[currentNeuron][previousNeuronIndex] += network->layers[currentLayer].gradients[currentNeuron] * network->layers[currentLayer - 1].values[previousNeuronIndex] * learningRate;
             }
+        }
+    }
+
+    // clear the gradients after applying them
+    for (int currentLayer = 0; currentLayer < network->layerCount; currentLayer++) {
+        for (int currentNeuron = 0; currentNeuron < network->layers[currentLayer].neuronCount; currentNeuron++) {
+            network->layers[currentLayer].gradients[currentNeuron] = 0;
         }
     }
 }
@@ -640,6 +625,16 @@ void exportNetworkJSON(Network *network, char *filename) {
     // write to file
     fprintf(fp, "{\n");
     fprintf(fp, "    \"layerCount\": %d,\n", network->layerCount);
+    fprintf(fp, "    \"activationFunctions\": [\n");
+    for (int i = 0; i < network->layerCount - 1; i++) {
+        fprintf(fp, "        %d", network->activationFunctions[i]);
+        if (i == network->layerCount - 2) {
+            fprintf(fp, "\n");
+        } else {
+            fprintf(fp, ",\n");
+        }
+    }
+    fprintf(fp, "    ],\n");
     fprintf(fp, "    \"layers\": [\n");
     for (int i = 0; i < network->layerCount; i++) {
         fprintf(fp, "        {\n");
@@ -703,6 +698,21 @@ Network *importNetworkJSON(char *filename) {
     // read from the file and set the network values based on input
     fscanf(fp, "{\n");
     fscanf(fp, "    \"layerCount\": %d,\n", &network->layerCount);
+    fscanf(fp, "    \"activationFunctions\": [\n");
+    network->activationFunctions = (int *)malloc((network->layerCount - 1) * sizeof(int));
+    if (network->activationFunctions == NULL) {
+        freeNetwork(network);
+        return NULL;
+    }
+    for (int i = 0; i < network->layerCount - 1; i++) {
+        fscanf(fp, "        %d", &network->activationFunctions[i]);
+        if (i == network->layerCount - 2) {
+            fscanf(fp, "\n");
+        } else {
+            fscanf(fp, ",\n");
+        }
+    }
+    fscanf(fp, "    ],\n");
     fscanf(fp, "    \"layers\": [\n");
     network->layers = (Layer *)malloc(network->layerCount * sizeof(Layer));
     if (network->layers == NULL) {

@@ -7,31 +7,30 @@
 // Declare network structures
 
 struct Layer {
-    float **incomingWeights;
-    float *biases;
-    float *values;
-    float *gradients;
-    int neuronCount;
+    float **incomingWeights;    // weights from previous layer to this layer
+    float *biases;              // biases for each neuron in this layer
+    float *values;              // values of each neuron in this layer
+    float *gradients;           // gradients of each neuron in this layer
+    int neuronCount;            // number of neurons in this layer
 };
 typedef struct Layer Layer;
 
 struct Network {
-    Layer *layers;
-    int layerCount;
+    Layer *layers;              // each layer of the network has its own weights, biases, values, and gradients
+    int *activationFunctions;   // each layer has its own activation function
+    int layerCount;             // number of layers in the network
 };
 typedef struct Network Network;
 
 // Redeclare network functions
-Network *createNetwork(int inputNodes, int hiddenLayers, int *hiddenNodes, int outputNodes);
+// ACTIVATION CODES: 0 = sigmoid, 1 = relu, 2 = tanh, 3 = linear, 4 = softmax (only for output activation)
+Network *createNetwork(int inputNodes, int hiddenLayers, int *hiddenNodes, int outputNodes, int *activationFunctions);
 void freeNetwork(Network *network);
-// activation codes: 0 = sigmoid, 1 = relu, 2 = softmax (only for output activation)
-void feedForward(Network *network, float *input, int hiddenActivation, int outputActivation);
+void feedForward(Network *network, float *input);
 void printNetwork(Network *network);
-// activation codes: 0 = sigmoid, 1 = relu, 2 = tanh, 3 = linear, 4 = softmax (only for output activation)
-void backPropagate(Network *network, float *expectedOutputs, float learningRate, int hiddenActivation, int outputActivation);
-void reinforceNetwork(Network *network, float *expectedOutputs, float learningRate, int hiddenActivation, int outputActivation);
+void backPropagate(Network *network, float *expectedOutputs, float learningRate);
+void reinforceNetwork(Network *network, float *expectedOutputs, float learningRate);
 void copyNetwork(Network *destination, Network *source);
-void copyNetworkGradually(Network *destination, Network *source, float rate);
 void exportNetworkJSON(Network *network, char *filename);
 Network *importNetworkJSON(char *filename);
 
